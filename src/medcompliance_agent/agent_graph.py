@@ -5,6 +5,10 @@ from langgraph.graph import StateGraph, END
 
 from .hybrid_retriever import HybridRetriever
 
+from .memory import ShortTermMemory, LongTermMemory, CheckpointStore
+from pathlib import Path
+from .config import PROJECT_ROOT
+
 
 class AgentState(TypedDict, total=False):
     """
@@ -118,6 +122,15 @@ def build_agent_graph(retriever: HybridRetriever):
     """
     Build and compile a simple LangGraph agent over the HybridRetriever.
     """
+    # Memory paths
+    ltm_path = PROJECT_ROOT / "data" / "memory" / "long_term.json"
+    ckpt_path = PROJECT_ROOT / "data" / "memory" / "checkpoint.json"
+
+    # Initialize memory systems
+    short_term = ShortTermMemory()
+    long_term = LongTermMemory(ltm_path)
+    checkpoint = CheckpointStore(ckpt_path)
+
     graph = StateGraph(AgentState)
 
     # Nodes
@@ -132,4 +145,27 @@ def build_agent_graph(retriever: HybridRetriever):
     graph.add_edge("generate_checklist", END)
 
     app = graph.compile()
-    return app
+
+    def run_with_memory(initial_state):
+        # Try load checkpoint
+        saved = checkpoint.load()
+        if saved:
+            print("\n[Agent] Resuming from checkpoint...")
+            initial_state = saved
+
+        # Run graph
+        final_state = app.invoke(initial_state)
+
+        # Save final checkpoint
+        checkpoint.save(final_state)
+
+        # Save to long-term memory
+        if final_state.get("device_info"):
+            long_term.add_record({
+                "device": final_state["device_info"],
+                "checklist": final_state.get("checklist"),
+            })
+
+        return final_state
+
+    return run_with_memory    

@@ -19,7 +19,7 @@ def main():
 
     # Build LangGraph app
     print("Compiling LangGraph agent...")
-    app = build_agent_graph(retriever)
+    run_agent = build_agent_graph(retriever)
 
     print("\n=== Starting MedCompliance Agent ===")
     print("The agent will ask you some questions about your device.\n")
@@ -28,7 +28,7 @@ def main():
     initial_state = {}
 
     # Run the agent once (single pass)
-    final_state = app.invoke(initial_state)
+    final_state = run_agent(initial_state)
 
     checklist = final_state.get("checklist")
     device_info = final_state.get("device_info", {})
