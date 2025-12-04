@@ -1,12 +1,15 @@
 [project]
-name = "medcompliance-agent"
+name = "medcompliance_agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "A simple RAG + agent prototype for regulatory text."
 readme = "README.md"
+
 authors = [
     { name = "Boran Gündoğan", email = "75067510+borangundogan@users.noreply.github.com" }
 ]
+
 requires-python = ">=3.12"
+
 dependencies = [
     "langchain-text-splitters>=1.0.0",
     "langgraph>=1.0.4",
@@ -14,8 +17,9 @@ dependencies = [
     "sentence-transformers>=5.1.2",
 ]
 
+# Entry point for `uv run medcompliance`
 [project.scripts]
-medcompliance-agent = "medcompliance_agent:main"
+medcompliance = "medcompliance_agent.main:main"
 
 [build-system]
 requires = ["uv_build>=0.9.4,<0.10.0"]
