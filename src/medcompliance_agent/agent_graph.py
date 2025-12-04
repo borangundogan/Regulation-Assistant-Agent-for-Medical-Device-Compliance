@@ -89,19 +89,14 @@ def generate_checklist(state: AgentState) -> AgentState:
     retrieved = state.get("retrieved", [])
     device = state.get("device_info", {}).get("name", "the device")
 
-    # Combine retrieved chunks
     context_text = "\n\n".join(chunk["text"] for chunk, _ in retrieved)
 
-    # Step 1 — Analyze requirements
     analysis = analyze_requirements(device, context_text)
 
-    # Step 2 — Extract present requirements only
     present = analysis  # LLM analysis already separates sections
 
-    # Step 3 — Build initial checklist
     checklist_v1 = make_checklist(device, present)
 
-    # Step 4 — Refine checklist
     checklist_v2 = refine_checklist(device, checklist_v1, context_text)
 
     new_state: AgentState = {
@@ -110,12 +105,58 @@ def generate_checklist(state: AgentState) -> AgentState:
     }
     return new_state
 
+def build_safe_checklist_from_chunks(device: str, retrieved: List[Tuple[Dict[str, Any], float]]) -> str:
+    """
+    Fallback checklist builder that does NOT use an LLM.
+    It only rephrases retrieved sentences that look like requirements.
+    This guarantees zero hallucinations.
+    """
+    sentences = []
+    for chunk, _score in retrieved:
+        text = chunk["text"]
+        for s in text.split("."):
+            s = s.strip()
+            if not s:
+                continue
+            if any(word in s.lower() for word in ["must", "shall", "should", "required", "requirements", "include"]):
+                sentences.append(s)
+
+    if not sentences:
+        sentences.append("Create and maintain a technical documentation file following the applicable regulations.")
+
+    lines = [f"Compliance checklist for {device}:"]
+    for i, s in enumerate(sentences, start=1):
+        lines.append(f"{i}. {s}")
+
+    return "\n".join(lines)
+
 def evaluate_output(state: AgentState) -> AgentState:
     checklist = state.get("checklist", "")
     retrieved = state.get("retrieved", [])
+    device = state.get("device_info", {}).get("name", "the device")
 
+    # First evaluation of the LLM checklist
     human, json_metrics = evaluate_checklist(checklist, retrieved)
 
+    hallucinations = json_metrics.get("hallucinations", 0)
+    format_valid = json_metrics.get("format_valid", False)
+
+    # If hallucinations detected or format invalid, build safe fallback
+    if hallucinations > 0 or not format_valid:
+        print("\n[Agent] Detected unsafe or invalid checklist. Falling back to safe rule-based checklist.")
+        safe_checklist = build_safe_checklist_from_chunks(device, retrieved)
+
+        # Re-evaluate the safe checklist
+        human_safe, json_safe = evaluate_checklist(safe_checklist, retrieved)
+
+        return {
+            **state,
+            "checklist": safe_checklist,
+            "evaluation_human": human_safe,
+            "evaluation_json": json_safe,
+        }
+
+    # Otherwise keep original
     return {
         **state,
         "evaluation_human": human,

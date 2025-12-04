@@ -11,10 +11,14 @@ authors = [
 requires-python = ">=3.12"
 
 dependencies = [
+    "fastapi>=0.123.8",
     "langchain-text-splitters>=1.0.0",
     "langgraph>=1.0.4",
     "rank-bm25>=0.2.2",
+    "requests>=2.32.5",
     "sentence-transformers>=5.1.2",
+    "streamlit>=1.52.0",
+    "uvicorn>=0.38.0",
 ]
 
 # Entry point for `uv run medcompliance`
