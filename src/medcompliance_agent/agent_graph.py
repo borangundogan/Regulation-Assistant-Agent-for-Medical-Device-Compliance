@@ -13,6 +13,8 @@ from .llm_client import call_llama
 
 from .reasoning import analyze_requirements, make_checklist, refine_checklist
 
+from .evaluation import evaluate_checklist
+
 class AgentState(TypedDict, total=False):
     """
     Shared state for the agent.
@@ -107,6 +109,18 @@ def generate_checklist(state: AgentState) -> AgentState:
     }
     return new_state
 
+def evaluate_output(state: AgentState) -> AgentState:
+    checklist = state.get("checklist", "")
+    retrieved = state.get("retrieved", [])
+
+    human, json_metrics = evaluate_checklist(checklist, retrieved)
+
+    return {
+        **state,
+        "evaluation_human": human,
+        "evaluation_json": json_metrics,
+    }
+
 def build_agent_graph(retriever: HybridRetriever):
     """
     Build and compile a simple LangGraph agent over the HybridRetriever.
@@ -126,12 +140,14 @@ def build_agent_graph(retriever: HybridRetriever):
     graph.add_node("collect_device_info", collect_device_info)
     graph.add_node("retrieve_regulations", retrieve_regulations(retriever))
     graph.add_node("generate_checklist", generate_checklist)
+    graph.add_node("evaluate_output", evaluate_output)
 
     # Edges (linear flow for now)
     graph.set_entry_point("collect_device_info")
     graph.add_edge("collect_device_info", "retrieve_regulations")
     graph.add_edge("retrieve_regulations", "generate_checklist")
-    graph.add_edge("generate_checklist", END)
+    graph.add_edge("generate_checklist", "evaluate_output")
+    graph.add_edge("evaluate_output", END)
 
     app = graph.compile()
 

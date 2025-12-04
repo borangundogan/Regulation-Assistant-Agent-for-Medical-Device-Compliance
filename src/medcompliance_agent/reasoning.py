@@ -55,26 +55,32 @@ Compliance checklist for <device>:
 
 
 def refine_checklist(device: str, checklist: str, context_text: str) -> str:
-    """
-    LLM self-evaluates and improves the checklist.
-    """
     messages = [
-        {"role": "system", "content": "You evaluate and refine compliance documents."},
+        {"role": "system", "content": "You refine compliance checklists. You are NOT allowed to add any requirement that is not explicitly stated in the provided regulatory text."},
         {"role": "user", "content": f"""
 Device: {device}
 
 Checklist draft:
 {checklist}
 
-Regulatory context:
+Regulatory context (you MUST NOT exceed this information):
 {context_text}
 
-Task:
-1. Check if checklist matches the regulations.
-2. Fix missing items.
-3. Remove hallucinations.
-4. Improve clarity.
-5. Output only the improved checklist.
+Your tasks:
+1. Improve wording and clarity.
+2. Remove redundancy.
+3. DO NOT add any new requirements.
+4. DO NOT assume general medical device rules.
+5. DO NOT expand content beyond what exists in the regulatory context.
+6. Maintain the SAME checklist structure:
+   Compliance checklist for <device>:
+   1. ...
+   2. ...
+   3. ...
+7. Output ONLY the refined checklist.
+8. DO NOT output explanations, reasoning, notes, or bullet points describing changes.
+9. DO NOT output any text except the final checklist.
+
 """},
     ]
     return call_llama(messages, model="llama3.1")
