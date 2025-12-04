@@ -1,57 +1,176 @@
-# MedCompliance Agent (Prototype)
+# 🩺 MedCompliance Agent
 
-A small, educational project to simulate part of a **medical device compliance assistant**:
+Evidence-bound compliance assistant for medical devices.
 
-- Uses **RAG** (Retrieval-Augmented Generation) over regulatory text.
-- Implements **hybrid retrieval** (dense vectors + BM25).
-- Provides simple **memory abstractions** (short-term and long-term).
-- Later, it can be extended with **LangGraph** agents and evaluation.
+This project is a fully working prototype of a regulatory AI agent that can:
 
----
+- Generate compliance checklists for medical devices
+- Use static MDR regulatory text or user-uploaded PDF regulations
+- Perform hybrid retrieval (Dense + BM25)
+- Run a LangGraph-based agent pipeline
+- Evaluate output for hallucinations, redundancy, and format correctness
+- Provide both a FastAPI backend and a Streamlit UI
 
-## 1. Motivation
+It demonstrates real-world skills needed for agentic AI systems used in MedTech and enterprise automation.
 
-This project is designed to practice and demonstrate skills that are relevant for:
+## 1. 🔧 Features
 
-- LLM-based agents
-- RAG systems
-- Hybrid retrieval
-- Memory management for AI agents
+✅ Hybrid Retrieval (BM25 + Dense Embeddings)
 
-It is inspired by use cases like **Formly.ai**, which help MedTech companies automate regulatory workflows.
+- BM25 for precise term matching
+- Dense embeddings (nomic-embed-text) for semantic recall
+- Score fusion → top-k combined results
 
----
+✅ Dynamic PDF Ingestion
 
-## 2. Project Overview
+- Users can upload any regulation PDF, and the system:
+  - Extracts text
+  - Chunks it
+  - Builds a temporary retriever
+  - Runs the AI agent on only that regulation set
 
-Pipeline:
+This makes it realistic for MedTech companies who work with MDR, IVDR, FDA guidance, IEC standards, etc.
 
-1. Load sample regulatory text from `data/regulations/`.
-2. Split text into chunks.
-3. Build:
-   - BM25 index (sparse retrieval)
-   - Dense vector index (embeddings)
-4. Implement a **HybridRetriever** that:
-   - Queries both indices
-   - Combines scores
-   - Returns top-k relevant chunks
+✅ LangGraph Agent Pipeline
 
-Later extensions (optional):
+- The agent performs:
+  - Device info collection
+  - Hybrid retrieval
+  - LLM-based reasoning
+  - Checklist generation
+  - Refinement
+  - Output safety check
+  - Evaluation (hallucination, redundancy, format validity)
+  - Includes short-term memory, long-term memory, and checkpoint recovery.
 
-- Add a simple **LangGraph agent** that:
-  - Asks for device info
-  - Queries regulations via the retriever
-  - Generates a **first-draft compliance checklist**
+✅ Evaluation Module
 
----
+- Every output is automatically analyzed for:
+  - Hallucinations
+  - Missing items
+  - Redundant checklist entries
+  - Format validity
+  - Basic coverage score
 
-## 3. Installation
+This is essential for safety-critical AI systems.
+
+✅ Full UI + API
+
+- Streamlit frontend
+- FastAPI backend
+- Both integrate with the agent pipeline
+
+## 2. 🚀 Project Structure
+
+```
+src/
+ ├── backend/
+ │    └── api.py              # FastAPI backend (PDF upload + default mode)
+ ├── frontend/
+ │    └── ui.py               # Streamlit UI
+ ├── medcompliance_agent/
+ │    ├── agent_graph.py      # LangGraph agent
+ │    ├── chunking.py         # Regulation text chunker
+ │    ├── hybrid_retriever.py # Dense + BM25 hybrid search
+ │    ├── evaluation.py       # Output evaluation
+ │    ├── data_loader.py      # Load static regulation text
+ │    ├── llm_client.py       # Local LLM (Ollama) calls
+ │    ├── memory.py           # Short-term, long-term, checkpoint memory
+ │    ├── pdf_utils.py        # PDF text extraction
+ │    ├── reasoning.py        # Requirement analysis & checklist generation
+ │    └── main.py             # CLI version
+ ├── data/
+ │    └── regulations/        # Static MDR-like example text
+ ├── README.md
+ ├── RULES.md
+ └── pyproject.toml
+```
+
+## 3. 📦 Installation
+
+Clone & enter project:
 
 ```bash
-git clone <this-repo-url>
+git clone <repo-url>
 cd medcompliance-agent
 
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+Create environment with uv:
+uv sync
 
+
+(Or classic pip:)
+
+python -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+## 4. ▶️ Running the System
+
+Start backend (FastAPI):
+
+```bash
+uv run uvicorn backend.api:app --reload
+```
+
+Backend runs at:
+
+http://127.0.0.1:8000
+
+Start frontend (Streamlit UI):
+
+```bash
+uv run streamlit run src/frontend/ui.py
+```
+
+UI runs at:
+
+http://localhost:8501
+
+## 5. 📄 How It Works
+
+Step 1 — Input
+
+- User provides:
+  - Device name
+  - Short description
+  - (Optional) A PDF file containing regulation text
+
+Step 2 — Retrieval
+
+- The system builds:
+  - BM25 index
+  - Dense embeddings
+  - Hybrid retriever (score fusion)
+
+Step 3 — Agent Execution (LangGraph)
+
+- The agent:
+  - Generates the search query
+  - Retrieves relevant regulation chunks
+  - Uses local LLM reasoning to produce a checklist
+  - Refines and cleans the output
+  - Validates safety (fallback if needed)
+  - Evaluates the final checklist
+
+Step 4 — Output
+
+- UI displays:
+  - Final checklist
+  - Evaluation summary
+  - Raw JSON evaluation
+
+## 6. 🔬 Example Output
+
+Checklist for pulse oximeter:
+
+- Medical devices must include a technical documentation file
+- The documentation shall include risk management, safety requirements, and performance evaluation
+- Manufacturers must provide clinical data and post-market surveillance plans
+
+Evaluation
+
+- Hallucinations: 0
+- Redundancy: 0.00
+- Format: Valid
+- Coverage: N/A
