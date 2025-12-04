@@ -4,11 +4,16 @@ from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
 
 from medcompliance_agent.data_loader import load_regulation_text
-from medcompliance_agent.chunking import chunk_text
+from medcompliance_agent.chunking import chunk_text, chunk_pdf_with_sections
 from medcompliance_agent.hybrid_retriever import HybridRetriever
 from medcompliance_agent.agent_graph import build_agent_graph
 from medcompliance_agent.pdf_utils import extract_text_from_pdf_bytes
 
+from medcompliance_agent.vector_store import QdrantStore
+
+from sentence_transformers import SentenceTransformer
+
+embedding_model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
 
 app = FastAPI(title="MedCompliance Agent API")
 
@@ -18,37 +23,7 @@ class DeviceRequest(BaseModel):
     description: str | None = None
 
 
-# Static global pipeline
-text = load_regulation_text()
-chunks = chunk_text(text)
-retriever = HybridRetriever(chunks)
-run_agent = build_agent_graph(retriever)
-
-
-@app.post("/generate")
-def generate_checklist(req: DeviceRequest):
-    """
-    Old endpoint: use static regulation text bundled with the project.
-    """
-    initial_state = {
-        "device_info": {
-            "name": req.device_name,
-            "description": req.description or "",
-        },
-        "query": f"documentation and regulatory requirements for {req.device_name}",
-    }
-
-    final_state = run_agent(initial_state)
-
-    return {
-        "device": final_state.get("device_info", {}),
-        "checklist": final_state.get("checklist"),
-        "evaluation": final_state.get("evaluation_json"),
-    }
-
-
 # dynamic endpoint: user uploaded PDF 
-
 @app.post("/generate_from_pdf")
 async def generate_from_pdf(
     pdf: UploadFile = File(...),
@@ -56,18 +31,35 @@ async def generate_from_pdf(
     description: str = Form(""),
 ):
     """
-    New endpoint: user uploads a regulation PDF.
-    We extract text, chunk it, build a temporary retriever+agent,
-    and run the pipeline just for this request.
+    User-uploaded PDF:
+    - extract the text
+    - segment into sections
+    - chunk into RAG pieces
+    - embed + store in Qdrant
+    - perform hybrid (dense + sparse) retrieval
+    - run LangGraph agent on top
     """
-    pdf_bytes = await pdf.read()
 
+    pdf_bytes = await pdf.read()
     raw_text = extract_text_from_pdf_bytes(pdf_bytes)
 
-    chunks = chunk_text(raw_text)
+    source_name = pdf.filename or "uploaded_pdf"
+    chunks = chunk_pdf_with_sections(raw_text, source_name=source_name)
 
-    local_retriever = HybridRetriever(chunks)
-    local_run_agent = build_agent_graph(local_retriever)
+    qdrant = QdrantStore(collection_name="user_regulations")
+
+    def embed_fn(text: str):
+        return embedding_model.encode(text).tolist()
+
+    qdrant.add_chunks(chunks, embed_fn)
+
+    retriever = HybridRetriever(
+        qdrant=qdrant,
+        chunks=chunks,
+        embed_fn=embed_fn
+    )
+
+    run_agent = build_agent_graph(retriever)
 
     initial_state = {
         "device_info": {
@@ -77,7 +69,7 @@ async def generate_from_pdf(
         "query": f"documentation and regulatory requirements for {device_name}",
     }
 
-    final_state = local_run_agent(initial_state)
+    final_state = run_agent(initial_state)
 
     return {
         "device": final_state.get("device_info", {}),

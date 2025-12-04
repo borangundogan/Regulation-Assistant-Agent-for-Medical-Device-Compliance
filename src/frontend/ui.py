@@ -41,7 +41,7 @@ if submitted:
                     f"{BACKEND_URL}/generate_from_pdf",
                     files=files,
                     data=data,
-                    timeout=120,
+                    timeout=320,
                 )
                 resp.raise_for_status()
                 result = resp.json()

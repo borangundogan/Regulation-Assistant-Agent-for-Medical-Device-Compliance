@@ -1,10 +1,11 @@
-# src/hybrid_retriever.py
-from typing import List, Dict, Tuple
-import numpy as np
+# src/medcompliance_agent/hybrid_retriever.py
+
+from typing import List, Dict, Tuple, Any
 from rank_bm25 import BM25Okapi
-from sentence_transformers import SentenceTransformer
+import numpy as np
+
+from .vector_store import QdrantStore
 from .config import (
-    EMBEDDING_MODEL_NAME,
     ALPHA_DENSE,
     BETA_SPARSE,
     TOP_K_BM25,
@@ -15,56 +16,101 @@ from .config import (
 
 class HybridRetriever:
     """
-    Simple hybrid retriever over regulation chunks.
-
-    - BM25 (sparse)
-    - Dense embeddings (SentenceTransformers)
+    Hybrid retriever combining:
+    - Qdrant dense vector search
+    - BM25 sparse search
     """
 
-    def __init__(self, chunks: List[Dict]):
+    def __init__(self, qdrant: QdrantStore, chunks: List[Dict], embed_fn):
+        """
+        qdrant   : QdrantStore instance
+        chunks   : raw text chunks (used only for sparse BM25)
+        embed_fn : function that produces embeddings for texts
+        """
+        self.qdrant = qdrant
+        self.embed_fn = embed_fn
+
+        # BM25 setup
         self.chunks = chunks
         self.texts = [c["text"] for c in chunks]
+        tokenized = [t.split() for t in self.texts]
+        self.bm25 = BM25Okapi(tokenized)
 
-        # Prepare BM25
-        tokenized_corpus = [t.split() for t in self.texts]
-        self.bm25 = BM25Okapi(tokenized_corpus)
+    def _sparse_search(self, query: str, top_k: int = TOP_K_BM25):
+        scores = self.bm25.get_scores(query.split())
 
-        # Prepare dense model + embeddings
-        self.model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-        self.embeddings = self.model.encode(self.texts, convert_to_numpy=True)
-
-    def _bm25_scores(self, query: str) -> np.ndarray:
-        scores = np.array(self.bm25.get_scores(query.split()), dtype=float)
-        # normalize to [0, 1]
+        # Normalize BM25 → [0, 1]
         if scores.max() > 0:
             scores = scores / scores.max()
-        return scores
 
-    def _dense_scores(self, query: str) -> np.ndarray:
-        query_emb = self.model.encode(query, convert_to_numpy=True)
-        # cosine similarity
-        dot = np.dot(self.embeddings, query_emb)
-        norm_docs = np.linalg.norm(self.embeddings, axis=1)
-        norm_query = np.linalg.norm(query_emb) + 1e-8
-        sims = dot / (norm_docs * norm_query)
-        # map from [-1,1] to [0,1]
-        sims = (sims + 1.0) / 2.0
-        return sims
+        # Pick top-k
+        idxs = np.argsort(scores)[::-1][:top_k]
 
-    def retrieve(self, query: str, top_k: int = TOP_K_HYBRID) -> List[Tuple[Dict, float]]:
+        results = []
+        for idx in idxs:
+            results.append({
+                "text": self.texts[idx],
+                "metadata": self.chunks[idx],
+                "score": float(scores[idx]),
+            })
+
+        return results
+
+    def _dense_search(self, query: str, top_k: int = TOP_K_DENSE):
         """
-        Return top_k chunks with combined hybrid scores.
+        Calls Qdrant vector search.
         """
-        sparse = self._bm25_scores(query)
-        dense = self._dense_scores(query)
+        dense_results = self.qdrant.search(query, self.embed_fn, top_k=top_k)
 
-        combined = ALPHA_DENSE * dense + BETA_SPARSE * sparse
+        # Already returns list of:
+        # {"text": ..., "metadata": ..., "score": ...}
+        return dense_results
 
-        # get top indices
-        top_indices = np.argsort(combined)[::-1][:top_k]
-        results: List[Tuple[Dict, float]] = []
+    def retrieve(self, query: str, top_k: int = TOP_K_HYBRID):
+        """
+        Hybrid scoring:
+            hybrid_score = ALPHA * dense + BETA * sparse
+        """
+        dense_hits = self._dense_search(query)
+        sparse_hits = self._sparse_search(query)
 
-        for idx in top_indices:
-            results.append((self.chunks[idx], float(combined[idx])))
+        combined = {}
+
+        # Add dense hits
+        for d in dense_hits:
+            key = d["text"]
+            combined[key] = {
+                "text": d["text"],
+                "metadata": d["metadata"],
+                "dense": d["score"],
+                "sparse": 0.0
+            }
+
+        # Add sparse hits
+        for s in sparse_hits:
+            key = s["text"]
+            if key not in combined:
+                combined[key] = {
+                    "text": s["text"],
+                    "metadata": s["metadata"],
+                    "dense": 0.0,
+                    "sparse": s["score"]
+                }
+            else:
+                combined[key]["sparse"] = s["score"]
+
+        # Compute hybrid score
+        final = []
+        for item in combined.values():
+            hybrid_score = ALPHA_DENSE * item["dense"] + BETA_SPARSE * item["sparse"]
+            final.append((item, hybrid_score))
+
+        # Sort by hybrid score
+        final = sorted(final, key=lambda x: x[1], reverse=True)
+
+        # Return top-k chunks
+        results = []
+        for item, score in final[:top_k]:
+            results.append(({"text": item["text"], "metadata": item["metadata"]}, score))
 
         return results
