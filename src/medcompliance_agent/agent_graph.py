@@ -11,6 +11,8 @@ from .config import PROJECT_ROOT
 
 from .llm_client import call_llama
 
+from .reasoning import analyze_requirements, make_checklist, refine_checklist
+
 class AgentState(TypedDict, total=False):
     """
     Shared state for the agent.
@@ -81,58 +83,29 @@ def retrieve_regulations(retriever: HybridRetriever):
 
 
 def generate_checklist(state: AgentState) -> AgentState:
-    """
-    LLM-powered checklist generation using llama3.1 (Ollama).
-    Much cleaner than the heuristic version.
-    """
-
     retrieved = state.get("retrieved", [])
     device = state.get("device_info", {}).get("name", "the device")
 
-    # Combine retrieved chunks into a context block
-    context_text = "\n\n".join(
-        f"- {chunk['text']}" for chunk, _ in retrieved
-    )
+    # Combine retrieved chunks
+    context_text = "\n\n".join(chunk["text"] for chunk, _ in retrieved)
 
-    prompt = f"""
-You are an expert in medical device regulatory compliance.
+    # Step 1 — Analyze requirements
+    analysis = analyze_requirements(device, context_text)
 
-Your task:
-Generate a clear and correct compliance checklist for a device, based ONLY on the retrieved regulation text.
+    # Step 2 — Extract present requirements only
+    present = analysis  # LLM analysis already separates sections
 
-Device: {device}
+    # Step 3 — Build initial checklist
+    checklist_v1 = make_checklist(device, present)
 
-Regulation Text:
-{context_text}
-
-Checklist requirements:
-- Use short, clear bullet points
-- Include only requirements supported by the text
-- Focus on documentation, safety, performance, clinical data
-- Do NOT hallucinate information
-- Format as:
-Compliance checklist for <device>:
-1. ...
-2. ...
-3. ...
-"""
-
-    messages = [
-        {"role": "system", "content": "You are a regulatory compliance assistant."},
-        {"role": "user", "content": prompt}
-    ]
-
-    llm_output = call_llama(messages, model="llama3.1")
-
-    if not llm_output:
-        llm_output = "Error: LLM did not produce output."
+    # Step 4 — Refine checklist
+    checklist_v2 = refine_checklist(device, checklist_v1, context_text)
 
     new_state: AgentState = {
         **state,
-        "checklist": llm_output,
+        "checklist": checklist_v2,
     }
     return new_state
-
 
 def build_agent_graph(retriever: HybridRetriever):
     """
