@@ -40,7 +40,7 @@ if submitted:
             response = requests.post(
                 "http://127.0.0.1:8000/generate",
                 json=payload,
-                timeout=20
+                timeout=120
             )
             data = response.json()
         except Exception as e:
