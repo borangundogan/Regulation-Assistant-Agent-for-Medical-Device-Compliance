@@ -1,10 +1,12 @@
-# src/__main__.py
+# src/medcompliance_agent/main.py
+
 from .data_loader import load_regulation_text
 from .chunking import chunk_text
 from .hybrid_retriever import HybridRetriever
+from .agent_graph import build_agent_graph
 
 
-def main() -> None:
+def main():
     print("Loading regulation text...")
     text = load_regulation_text()
 
@@ -15,17 +17,26 @@ def main() -> None:
     print("Building hybrid retriever (this may take a moment)...")
     retriever = HybridRetriever(chunks)
 
-    query = "What are the documentation requirements for a medical device?"
-    print(f"\nQuery: {query}\n")
+    # Build LangGraph app
+    print("Compiling LangGraph agent...")
+    app = build_agent_graph(retriever)
 
-    results = retriever.retrieve(query, top_k=5)
+    print("\n=== Starting MedCompliance Agent ===")
+    print("The agent will ask you some questions about your device.\n")
 
-    for i, (chunk, score) in enumerate(results, start=1):
-        print(f"--- Result {i} (score={score:.3f}, id={chunk['id']}) ---")
-        print(chunk["text"][:500])
-        print()
+    # Initial empty state
+    initial_state = {}
 
-    print("Done.")
+    # Run the agent once (single pass)
+    final_state = app.invoke(initial_state)
+
+    checklist = final_state.get("checklist")
+    device_info = final_state.get("device_info", {})
+
+    print("\n=== Agent Output ===")
+    print(f"Device: {device_info.get('name', 'unknown')}")
+    print()
+    print(checklist or "No checklist generated.")
 
 
 if __name__ == "__main__":
