@@ -25,7 +25,8 @@ class AgentState(TypedDict, total=False):
     query: str
     retrieved: List[Tuple[Dict[str, Any], float]]
     checklist: str
-
+    evaluation_human: str
+    evaluation_json: Dict[str, Any]
 
 def collect_device_info(state: AgentState) -> AgentState:
     """

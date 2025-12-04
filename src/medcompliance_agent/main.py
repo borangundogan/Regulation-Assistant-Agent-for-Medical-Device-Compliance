@@ -30,13 +30,18 @@ def main():
     # Run the agent once (single pass)
     final_state = run_agent(initial_state)
 
-    checklist = final_state.get("checklist")
-    device_info = final_state.get("device_info", {})
+    if "checklist" not in final_state:
+        print("Error: Checklist not produced.")
+        return
 
     print("\n=== Agent Output ===")
-    print(f"Device: {device_info.get('name', 'unknown')}")
-    print()
-    print(checklist or "No checklist generated.")
+    print(f"Device: {final_state['device_info']['name']}")
+
+    print("\n=== Checklist ===")
+    print(final_state["checklist"])
+
+    print("\n=== Evaluation ===")
+    print(final_state["evaluation_human"])
 
 
 if __name__ == "__main__":
