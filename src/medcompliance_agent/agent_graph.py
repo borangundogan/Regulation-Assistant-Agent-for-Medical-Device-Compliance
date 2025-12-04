@@ -9,6 +9,7 @@ from .memory import ShortTermMemory, LongTermMemory, CheckpointStore
 from pathlib import Path
 from .config import PROJECT_ROOT
 
+from .llm_client import call_llama
 
 class AgentState(TypedDict, total=False):
     """
@@ -81,39 +82,54 @@ def retrieve_regulations(retriever: HybridRetriever):
 
 def generate_checklist(state: AgentState) -> AgentState:
     """
-    Very simple "LLM-free" checklist generator.
-
-    We simulate how an LLM might turn retrieved chunks into a structured checklist.
-    In a real system, this would call an LLM.
+    LLM-powered checklist generation using llama3.1 (Ollama).
+    Much cleaner than the heuristic version.
     """
+
     retrieved = state.get("retrieved", [])
     device = state.get("device_info", {}).get("name", "the device")
 
-    bullet_points: List[str] = []
+    # Combine retrieved chunks into a context block
+    context_text = "\n\n".join(
+        f"- {chunk['text']}" for chunk, _ in retrieved
+    )
 
-    for chunk, _score in retrieved:
-        text = chunk["text"]
-        # Naive split into sentences
-        sentences = [s.strip() for s in text.split(".") if s.strip()]
-        for s in sentences:
-            # Simple heuristic: keep sentences that look like requirements
-            if any(word in s.lower() for word in ["must", "shall", "should", "required"]):
-                bullet_points.append(s)
+    prompt = f"""
+You are an expert in medical device regulatory compliance.
 
-    if not bullet_points:
-        bullet_points.append(
-            "Review relevant regulations and create a technical documentation file for the device."
-        )
+Your task:
+Generate a clear and correct compliance checklist for a device, based ONLY on the retrieved regulation text.
 
-    checklist_lines = [f"Compliance checklist for {device}:"]
-    for i, bp in enumerate(bullet_points, start=1):
-        checklist_lines.append(f"{i}. {bp}")
+Device: {device}
 
-    checklist_text = "\n".join(checklist_lines)
+Regulation Text:
+{context_text}
+
+Checklist requirements:
+- Use short, clear bullet points
+- Include only requirements supported by the text
+- Focus on documentation, safety, performance, clinical data
+- Do NOT hallucinate information
+- Format as:
+Compliance checklist for <device>:
+1. ...
+2. ...
+3. ...
+"""
+
+    messages = [
+        {"role": "system", "content": "You are a regulatory compliance assistant."},
+        {"role": "user", "content": prompt}
+    ]
+
+    llm_output = call_llama(messages, model="llama3.1")
+
+    if not llm_output:
+        llm_output = "Error: LLM did not produce output."
 
     new_state: AgentState = {
         **state,
-        "checklist": checklist_text,
+        "checklist": llm_output,
     }
     return new_state
 
