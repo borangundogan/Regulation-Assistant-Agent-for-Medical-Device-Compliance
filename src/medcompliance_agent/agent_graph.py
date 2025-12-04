@@ -1,0 +1,135 @@
+# src/medcompliance_agent/agent_graph.py
+
+from typing import TypedDict, Dict, Any, List, Tuple
+from langgraph.graph import StateGraph, END
+
+from .hybrid_retriever import HybridRetriever
+
+
+class AgentState(TypedDict, total=False):
+    """
+    Shared state for the agent.
+
+    We keep this intentionally small and simple.
+    """
+    device_info: Dict[str, str]
+    query: str
+    retrieved: List[Tuple[Dict[str, Any], float]]
+    checklist: str
+
+
+def collect_device_info(state: AgentState) -> AgentState:
+    """
+    Simple CLI-based device info collection.
+
+    In a real system this would come from a form or API.
+    """
+    if "device_info" in state:
+        # Already provided (e.g., from API)
+        return state
+
+    print("=== Device Information ===")
+    name = input("Device name (e.g., 'pulse oximeter'): ").strip()
+    desc = input("Short description of the device: ").strip()
+
+    device_info = {
+        "name": name or "unknown device",
+        "description": desc or "no description",
+    }
+
+    query = f"documentation and regulatory requirements for {device_info['name']}"
+
+    new_state: AgentState = {
+        **state,
+        "device_info": device_info,
+        "query": query,
+    }
+    return new_state
+
+
+def retrieve_regulations(retriever: HybridRetriever):
+    """
+    Factory that returns a node function bound to our retriever.
+
+    This lets us inject the retriever when we build the graph.
+    """
+
+    def _node(state: AgentState) -> AgentState:
+        query = state.get("query")
+        if not query:
+            # Fallback: build a generic query
+            device = state.get("device_info", {}).get("name", "a medical device")
+            query_local = f"documentation requirements for {device}"
+        else:
+            query_local = query
+
+        print(f"\n[Agent] Running hybrid retrieval for query: '{query_local}'")
+        results = retriever.retrieve(query_local, top_k=5)
+
+        new_state: AgentState = {
+            **state,
+            "retrieved": results,
+        }
+        return new_state
+
+    return _node
+
+
+def generate_checklist(state: AgentState) -> AgentState:
+    """
+    Very simple "LLM-free" checklist generator.
+
+    We simulate how an LLM might turn retrieved chunks into a structured checklist.
+    In a real system, this would call an LLM.
+    """
+    retrieved = state.get("retrieved", [])
+    device = state.get("device_info", {}).get("name", "the device")
+
+    bullet_points: List[str] = []
+
+    for chunk, _score in retrieved:
+        text = chunk["text"]
+        # Naive split into sentences
+        sentences = [s.strip() for s in text.split(".") if s.strip()]
+        for s in sentences:
+            # Simple heuristic: keep sentences that look like requirements
+            if any(word in s.lower() for word in ["must", "shall", "should", "required"]):
+                bullet_points.append(s)
+
+    if not bullet_points:
+        bullet_points.append(
+            "Review relevant regulations and create a technical documentation file for the device."
+        )
+
+    checklist_lines = [f"Compliance checklist for {device}:"]
+    for i, bp in enumerate(bullet_points, start=1):
+        checklist_lines.append(f"{i}. {bp}")
+
+    checklist_text = "\n".join(checklist_lines)
+
+    new_state: AgentState = {
+        **state,
+        "checklist": checklist_text,
+    }
+    return new_state
+
+
+def build_agent_graph(retriever: HybridRetriever):
+    """
+    Build and compile a simple LangGraph agent over the HybridRetriever.
+    """
+    graph = StateGraph(AgentState)
+
+    # Nodes
+    graph.add_node("collect_device_info", collect_device_info)
+    graph.add_node("retrieve_regulations", retrieve_regulations(retriever))
+    graph.add_node("generate_checklist", generate_checklist)
+
+    # Edges (linear flow for now)
+    graph.set_entry_point("collect_device_info")
+    graph.add_edge("collect_device_info", "retrieve_regulations")
+    graph.add_edge("retrieve_regulations", "generate_checklist")
+    graph.add_edge("generate_checklist", END)
+
+    app = graph.compile()
+    return app
